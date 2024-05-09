@@ -1,0 +1,80 @@
+library(tidyverse)
+library(hrbrthemes)
+
+dat <- readr::read_rds("EAA.rds") 
+
+# weighted means, results text
+means <- dat %>%
+  group_by(t, Group) %>%
+  summarise(pedbe_wtmean = weighted.mean(pedbe_resid, w = weights),
+            horvath_wtmean = weighted.mean(horvath_resid, w = weights)) 
+means
+
+# weighted boxplots PedBE, figure 1
+fig1 <- 
+  dat %>% 
+  mutate(Group = fct_rev(Group)) %>%
+  ggplot(aes(x = Group, y=pedbe_resid, color=Group))+
+  geom_jitter(aes(size = weights), shape=20, alpha=0.7, position = position_jitterdodge(dodge.width = .9)) + # add weights to point size aes()
+  geom_boxplot(aes(weight = weights), outlier.shape = NA, alpha = .25) + # add weights to boxplot aes()
+  facet_wrap(~ timepoint) +
+  labs(
+    title = NULL,
+    fill = NULL, 
+    color = NULL, 
+    y = "PedBE epigenetic age acceleration",
+    #caption = "Point size is propensity score weight in community sample.\nIn CPP, all samples are equally weighted"
+    caption = NULL) + 
+  guides(size = "none") +
+  hrbrthemes::theme_ipsum(axis_title_just = "mc") +
+  scale_color_viridis_d(option = "plasma", end = .7) +
+  theme(legend.position = "bottom",
+        axis.text.x = element_blank(),
+        axis.title.x = element_blank(),
+        axis.text.y = element_text(size = 24),
+        axis.title.y = element_text(size = 20),
+        strip.text = element_text(size = 20),
+        legend.text = element_text(size = 20))
+fig1
+
+# PedBE EAA group comparison, results text
+t0 <- (lm(pedbe_resid ~ Group + latino + age + age_diff + sex + adversity_score, data=dat[dat$t==0,], weights=weights)) 
+anova(t0)
+
+t1 <- (lm(pedbe_resid ~ Group + latino + age + age_diff + sex + adversity_score, data=dat[dat$t==1,], weights=weights))
+anova(t1) 
+
+# sensitivity analysis Horvath pantissue EAA group comparison, results text
+t0_sensitivity <- (lm(horvath_resid ~ Group + latino + age + age_diff + sex + adversity_score, data=dat[dat$t==0,], weights=weights)) 
+anova(t0_sensitivity)
+
+t1_sensitivity <- (lm(horvath_resid ~ Group + latino + age + age_diff + sex + adversity_score, data=dat[dat$t==1,], weights=weights))
+anova(t1_sensitivity) 
+
+# weighted boxplots Horvath pantissue, supplemental figure 4
+fig4_supp <- 
+  dat %>% 
+  mutate(Group = fct_rev(Group)) %>%
+  ggplot(aes(x = Group, y=horvath_resid, color=Group))+
+  geom_jitter(aes(size = weights),shape=20,alpha=0.7, position = position_jitterdodge(dodge.width = .9)) +
+  geom_boxplot(aes(weight = weights), outlier.shape = NA, alpha = .25) +
+  facet_wrap(~ timepoint) +
+  labs(
+    title = NULL,
+    fill = NULL, 
+    color = NULL, 
+    y = "Horvath pantissue epigenetic age acceleration",
+    #caption = "Point size is propensity score weight in community sample.\nIn CPP, all samples are equally weighted"
+    caption = NULL) +
+  guides(size = "none") +
+  hrbrthemes::theme_ipsum(axis_title_just = "mc") +
+  scale_color_viridis_d(option = "plasma", end = .7) +
+  theme(legend.position = "bottom",
+        axis.text.x = element_blank(),
+        axis.title.x = element_blank(),
+        axis.text.y = element_text(size = 24),
+        axis.title.y = element_text(size = 20),
+        strip.text = element_text(size = 20),
+        legend.text = element_text(size = 20))
+
+fig4_supp
