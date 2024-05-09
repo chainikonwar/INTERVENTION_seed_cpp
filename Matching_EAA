@@ -1,0 +1,74 @@
+library(tidyverse)
+library(nlme)
+library(MatchIt)
+library(optmatch)
+
+# data
+load("DNAmAge.rdata")
+# 1. epi clock data at T0 and T1: DNAm Age, Chronological Age, BEC %. 
+# 2. demographic variables and covariates
+
+# select sample with 2x timepoints
+# compute lag/dif for chronological age and bec %
+# n = 219 sample pool
+pairs <- clocks %>% 
+  select(id, t, age, bec) %>%
+  group_by(id) %>%
+  mutate(lag1 = t - lag(t) == 1, # consecutive timepoints for community sample (t0-t1 and t1-t2)
+         age_0 = lag(age, order_by = t),
+         age_diff = age - age_0, # duration between samples 
+         bec_diff = bec - lag(bec, order_by = t)) %>% # and bec % difference between buccal collections
+  na.omit() %>%
+  filter(lag1) %>% # keep consecutive (i.e., lag 1) visits, excludes 6 cases with t0-t2 pairs (i.e., missing t1 buccal)
+  select(pair = "t", id, age_0, age_diff, bec_diff) %>%
+  ungroup()
+
+# combine clock sample pool with matching covariates 
+df <- left_join(pairs, demog[, 1:5], by = join_by(id))
+
+# matching 1. full matching for all sample, deprioritize duplicates
+prelim <- matchit(Group ~ adversity_score + age_diff + age_0 + sex + latino + bec_diff,
+                  data = df,
+                  method="full", distance = "glm", link = "probit", ratio=1, replace= FALSE)
+
+# remove duplicates
+# n = 155 unique samples after prelim matching
+set.seed(1654)
+df_nodup <- 
+  match.data(prelim) %>%
+  group_by(id) %>%
+  slice_max(weights, n = 1, with_ties = T) %>% # select largest weight, but still keep both if weights tied
+  slice_sample(n = 1) %>% # randomly select remaining duplicates (i.e., tied weights)
+  select(-c(distance, weights, subclass)) %>% # discard prelim match fields
+  ungroup()
+
+# matching 2. full matching to get propensity score weights for group comparison
+match <- matchit(Group ~ age_0 + age_diff + sex + bec_diff + latino + adversity_score,
+                 data = df_nodup, 
+                 method="full", distance = "glm", link = "probit", ratio=1, replace= FALSE, 
+                 caliper = 0.2, std.caliper=TRUE, estimand = "ATT")
+df_weights <- match.data(match)
+
+# calculate age acceleration in matched samples
+# generate EAA. residualized DNAm Age w/ chronological age and bec % and random intercept (subject id)
+EAA <- 
+  bind_rows(
+    # subset dnam age to matched and de-deduplicated data
+    clocks %>% 
+      filter(id %in% (df_nodup$id[df_nodup$pair==1])) %>% 
+      filter(t %in% c(0, 1)),
+    clocks %>% 
+      filter(id %in% (df_nodup$id[df_nodup$pair==2])) %>% 
+      filter(t %in% c(1, 2)) %>%
+      # for community sample, rename timepoints --> t0, t1 if data were selected from t1 and t2.
+      mutate(t = t - 1)
+  ) %>%
+  arrange(id, t) %>%
+  left_join(demog) %>% # add demographic data and covariates
+  inner_join(df_weights[, c("id", "age_0", "age_diff", "bec_diff", "weights")]) # add weights + DNAmAge-related covariates age at baseline, age diff, bec diff
+
+EAA$timepoint <- factor(EAA$t, levels = c(0, 1), labels = c("Baseline", "Post-intervention"))  
+EAA$pedbe_resid <- residuals(nlme::lme(pedbe ~ age + bec, random = ~1|id, data = EAA, method = "ML", na.action = "na.omit"))
+EAA$horvath_resid <- residuals(nlme::lme(horvath ~ age + bec, random = ~1|id, data = EAA, method = "ML", na.action = "na.omit"))
+
+# write_rds(EAA, file = "EAA.rds")
